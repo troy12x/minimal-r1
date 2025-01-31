@@ -1,0 +1,38 @@
+# wandb 
+wandb/
+*.wandb
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+venv/
+env/
+.env/
+.venv/
+
+# package
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# system
+.DS_Store
+Thumbs.db
+
+# log
+*.log
+
+# checkpoints
+checkpoints/
+*.pth
+
+push_to_hub.py

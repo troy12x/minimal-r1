@@ -1,0 +1,13 @@
+accelerate
+datasets
+fastapi
+latex2sympy2-extended
+math_verify
+pydantic
+requests
+torch
+torchvision
+transformers
+tqdm
+uvicorn
+wandb
