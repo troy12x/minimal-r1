@@ -33,6 +33,15 @@ Thumbs.db
 
 # checkpoints
 checkpoints/
+checkpoints_level1/
+checkpoints_level2/
+checkpoints_level3/
 *.pth
 
 push_to_hub.py
+ksat_2023.py
+math_500_split_by_level.py 
+merge_ds.py 
+plot.py
+test_base_model.py 
+

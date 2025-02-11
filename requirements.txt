@@ -11,3 +11,7 @@ transformers
 tqdm
 uvicorn
 wandb
+deepspeed
+scikit-learn
+huggingface_hub
+vllm

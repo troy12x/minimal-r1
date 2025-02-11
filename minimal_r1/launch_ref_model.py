@@ -26,7 +26,7 @@ args = parser.parse_args()
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# 모델 및 토크나이저 로드
+# Model and tokenizer loading
 print("Loading ref_model...")
 tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
 if tokenizer.pad_token is None:
@@ -53,7 +53,7 @@ async def compute_logprob(request: LogProbRequest):
     try:
         prompts, generations = request.prompts, request.generations
 
-        # 토큰화
+        # tokenize
         prompt_input_ids = tokenizer.batch_encode_plus(
             prompts, return_tensors="pt", padding=True, padding_side="left"
         ).to(DEVICE)

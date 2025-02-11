@@ -92,7 +92,7 @@ def compute_logprob(model, tokenizer, prompt_and_gen):
 
     return per_token_logps, completion_mask
 
-def save_with_accelerate(accelerator, model, output_dir):
+def save_with_accelerate(accelerator, model, tokenizer, output_dir):
     accelerator.deepspeed_plugin.zero3_save_16bit_model = True
     accelerator.deepspeed_plugin.stage3_gather_16bit_weights_on_model_save = True
 
@@ -107,6 +107,7 @@ def save_with_accelerate(accelerator, model, output_dir):
             save_function=accelerator.save, 
             state_dict=state_dict
         )
+        tokenizer.save_pretrained(output_dir)
 
 def main(args):
     # 1) Accelerate 초기화
@@ -127,6 +128,7 @@ def main(args):
     reward_funcs  = [
         reward_funcs_registry["accuracy"],
         reward_funcs_registry["format"],
+        reward_funcs_registry["repetition_penalty"],
     ]
     gradient_accumulation_steps = accelerator.deepspeed_plugin.gradient_accumulation_steps
     num_gpus = accelerator.num_processes
@@ -152,6 +154,7 @@ def main(args):
         policy_model.parameters(),
         lr=args.lr,
         betas=(0.9, 0.999),
+        weight_decay=0.01,
     )
 
     # Accelerate prepare
@@ -187,7 +190,7 @@ def main(args):
             batch_size = len(batch["problem"])
             prompts : list[str] = batch["problem"]
             prompts = [[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}] for prompt in prompts]
-            prompts = [tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True) for prompt in prompts] # [batch_size]
+            prompts = [tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True) +"<think>" for prompt in prompts] # [batch_size]
 
             all_prompts : list[str] = gather_object(prompts) # [num_gpus * batch_size]
 
@@ -229,6 +232,19 @@ def main(args):
                     rewards_per_func[:, i] = torch.tensor(rewards)
                 
                 rewards = rewards_per_func.sum(dim=1) # [batch_size * num_gen]
+
+                # # reward_funcs 순서가 [accuracy_reward, format_reward]라고 가정하면:
+                # accuracy_rewards = rewards_per_func[:, 0]
+                # format_rewards   = rewards_per_func[:, 1]
+
+                # # 최종 보상 계산:
+                # # - accuracy_reward가 맞지 않으면(0이면) 최종 보상 0
+                # # - accuracy_reward가 맞으면, format_reward의 결과도 더함 (단, format_reward만 맞으면 보상은 0)
+                # rewards = torch.where(
+                #     accuracy_rewards == 1.0,      # accuracy_reward가 맞으면
+                #     accuracy_rewards + format_rewards,  # 둘 다 맞은 경우: 두 값을 합산 (accuracy + format)
+                #     torch.zeros_like(accuracy_rewards)  # accuracy_reward가 틀리면 0
+                # )
                 
                 # Calculate advantage
                 mean_grouped_rewards = rewards.view(-1, num_gen).mean(dim=1)
@@ -267,7 +283,8 @@ def main(args):
 
             # for log
             completion_length = accelerator.gather_for_metrics(completion_mask.sum(1)).float().mean().item()
-            reward_per_func = accelerator.gather_for_metrics(rewards_per_func).mean(0)
+            _reward_per_func = accelerator.gather_for_metrics(rewards_per_func)
+            reward_per_func = _reward_per_func.mean(0)
             for i, reward_func in enumerate(reward_funcs):
                 reward_func_name = reward_func.__name__
                 _metrics[f"rewards/{reward_func_name}"] = reward_per_func[i].item()
@@ -281,41 +298,56 @@ def main(args):
 
             if accelerator.is_main_process:
                 wandb.log(_metrics)
-                wandb.log({"generation_table":  wandb.Table(columns=["step", "prompt", "generation"], data=[[global_step + 1, local_prompts[0], local_generations[0]]])}, step=global_step + 1)
+                local_reward_per_func = _reward_per_func[:args.num_gen] # (num_gen, 3)
+                try:
+                    wandb.log({"generation_table":  wandb.Table(
+                        columns=["step"] + [f"reward_{_func.__name__}" for _func in reward_funcs] + ["prompt", "generation"],
+                        data=[[global_step + 1] + [local_reward_per_func[i][j] for j in range(len(reward_funcs))] + [local_prompts[i], local_generations[i]] for i in range(len(local_prompts))])}, 
+                        step=global_step + 1
+                    )
+                except Exception as e:
+                    print(f"[ERROR] Failed to log generation table: {e}")
+                    print(f" + local_reward_per_func: {local_reward_per_func}")
+                    print(f" + local_prompts: {local_prompts}")
+                    print(f" + local_generations: {local_generations}")
                 progress_bar.update(1)
 
                 print(f"[step : {step}] Generation: {generation_end_time - generation_start_time:.2f} | Policy logp: {policy_logp_end_time - policy_logp_start_time:.2f} | Ref logp: {ref_logp_end_time - ref_logp_start_time:.2f} | Backward: {backward_end_time - backward_start_time:.2f} | Sync: {sync_end_time - sync_start_time:.2f}")
 
-            if (step) % args.save_step == 0:    
+            if (global_step + 1) % args.save_step == 0:    
                  # saveing every epoch
                 accelerator.wait_for_everyone()
-                save_with_accelerate(accelerator, policy_model, f"checkpoints/policy_model_{global_step}")
+                save_with_accelerate(accelerator, policy_model, tokenizer, f"checkpoints/policy_model_{global_step}")
                 accelerator.wait_for_everyone()
                 print(f"Model saved to checkpoints/policy_model_{global_step}")
             
             global_step += 1
+        
+        # save last model
+        accelerator.wait_for_everyone()
+        save_with_accelerate(accelerator, policy_model, tokenizer, f"checkpoints/policy_model_{global_step}")
+        accelerator.wait_for_everyone()
+        print(f"Model saved to checkpoints/policy_model_{global_step}")
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--num_gen", type=int, default=5)
+    parser.add_argument("--num_gen", type=int, default=8)
     parser.add_argument("--max_tokens", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=5e-6)
     parser.add_argument("--beta", type=float, default=0.04, help="KL divergence weight")
     parser.add_argument("--model_name", type=str, default="Seungyoun/Qwen2.5-7B-Open-R1-Distill")
-    parser.add_argument("--dataset_name", type=str, default="AI-MO/NuminaMath-TIR")
+    parser.add_argument("--dataset_name", type=str, default="Seungyoun/MATH-9K")
     parser.add_argument("--vllm_server_url", type=str, default="http://localhost:8000")
     parser.add_argument("--ref_model_api_url", type=str, default="http://localhost:8001")
     parser.add_argument("--save_step", type=int, default=500)
     parser.add_argument("--system_prompt", type=str, default=(
-        "A conversation between User and Assistant. The user asks a mathematical question, and the Assistant solves it. "
-        "The assistant first thinks about the solution step by step, showing all reasoning clearly. The reasoning "
-        "process should be enclosed within <think> </think> tags, and the final answer should be provided within "
-        "<answer> </answer> tags with the result in \\boxed{}. For example: "
-        "<think>Let's solve this step by step:\n1) First...\n2) Then...\n3) Finally...</think>"
-        "<answer>\\boxed{final answer here}</answer>"
+        "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant "
+        "first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning "
+        "process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., "
+        "<think> reasoning process here </think><answer> answer here </answer>"
     ))
     args = parser.parse_args()
 

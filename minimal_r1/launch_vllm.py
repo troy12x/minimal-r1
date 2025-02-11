@@ -35,17 +35,12 @@ app = FastAPI(title="vLLM Server", version="0.1")
 
 
 # ----------- vLLM init -----------
+print(f"args.model_name: {args.model_name}")
 llm = LLM(
     model=args.model_name,
     trust_remote_code=True,
     tensor_parallel_size=2,  # add this if you want to use multiple GPUs
     dtype="bfloat16"
-)
-# 기본 샘플링 파라미터
-default_params = SamplingParams(
-    temperature=0.8,
-    top_p=0.95,
-    max_tokens=128,
 )
 
 
@@ -66,11 +61,15 @@ def generate(req: GenerateRequest):
     sampling_params = SamplingParams(
         temperature=req.temperature,
         top_p=0.95,
+        top_k=50,
+        repetition_penalty=1.0,
         max_tokens=req.max_tokens,
+        n = req.num_gen,
+        # stop=["</answer>"]
     )
 
     num_prompts = len(req.prompts)  # Original number of prompts
-    outputs = llm.generate(req.prompts * req.num_gen, sampling_params)  # Ensured multiplication
+    outputs = llm.generate(req.prompts, sampling_params)  # Ensured multiplication
 
     # Initialize the correct number of lists
     generations = [[] for _ in range(num_prompts)]
@@ -78,7 +77,8 @@ def generate(req: GenerateRequest):
     # Correctly distribute outputs back into the corresponding prompt group
     for i, output in enumerate(outputs):
         prompt_idx = i % num_prompts  # Ensures proper grouping
-        generations[prompt_idx].append(output.outputs[0].text)  # Append to corresponding list
+        for _output in output.outputs:
+            generations[prompt_idx].append(_output.text)  # Append to corresponding list
 
     return GenerateResponse(generations=generations)
 
