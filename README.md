@@ -28,9 +28,11 @@ By **separating generation and reference models**, Minimal-R1 ensures more effic
 | Qwen2.5-7B-MATH-ZeroRL-1700step(MATH-8K) | 20.00 | 75.40 | 32.83 |
 
 Training log : 
+
 <img src="misc/grpo_training_log.png" alt="training log" width="500"/>
 
 Evaluation log : 
+
 <img src="misc/perf.png" alt="evaluation log" width="500"/>
 
 ### How to Run
