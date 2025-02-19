@@ -190,7 +190,7 @@ def main(args):
             batch_size = len(batch["problem"])
             prompts : list[str] = batch["problem"]
             prompts = [[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}] for prompt in prompts]
-            prompts = [tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True) +"<think>" for prompt in prompts] # [batch_size]
+            prompts = [tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True) +"<|begin_of_thought|>" for prompt in prompts] # [batch_size]
 
             all_prompts : list[str] = gather_object(prompts) # [num_gpus * batch_size]
 
@@ -335,19 +335,16 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--num_gen", type=int, default=8)
-    parser.add_argument("--max_tokens", type=int, default=1024)
+    parser.add_argument("--max_tokens", type=int, default=8129)
     parser.add_argument("--lr", type=float, default=5e-6)
     parser.add_argument("--beta", type=float, default=0.04, help="KL divergence weight")
-    parser.add_argument("--model_name", type=str, default="Seungyoun/Qwen2.5-7B-Open-R1-Distill")
+    parser.add_argument("--model_name", type=str, default="silx-ai/Quasar-2.5-7B-Ultra")
     parser.add_argument("--dataset_name", type=str, default="Seungyoun/MATH-9K")
     parser.add_argument("--vllm_server_url", type=str, default="http://localhost:8000")
     parser.add_argument("--ref_model_api_url", type=str, default="http://localhost:8001")
     parser.add_argument("--save_step", type=int, default=500)
     parser.add_argument("--system_prompt", type=str, default=(
-        "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant "
-        "first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning "
-        "process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., "
-        "<think> reasoning process here </think><answer> answer here </answer>"
+    "You are Quasar-1, an advanced creation by SILX AI. You are a helpful AI Assistant that provides well-reasoned and detailed responses involves thoroughly exploring questions through a systematic long thinking process before providing the final precise . to reach the conclusion, formatted as follows:  <|begin_of_thought|>{Your detailed thinking process here}<|end_of_thought|> <|begin_of_solution|> {final formatted, precise, and clear solution} <|end_of_solution|>"
     ))
     args = parser.parse_args()
 
