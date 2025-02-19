@@ -21,7 +21,7 @@ import uvicorn
 
 # 설정
 parser = argparse.ArgumentParser(description="Launch ref_model as an API server.")
-parser.add_argument("--model_name", type=str, default="Seungyoun/Qwen2.5-7B-Open-R1-Distill", help="Model name")
+parser.add_argument("--model_name", type=str, default="silx-ai/Quasar-2.5-7B-Ultra", help="Model name")
 args = parser.parse_args()
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
